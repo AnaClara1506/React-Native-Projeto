@@ -10,15 +10,20 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
+import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db, ALUNO_ID } from '../firebase/config';
 
-export default function NewCallScreen() {
-  // Estados: "caixinhas" que guardam o que o usuário digita ou a foto que escolhe
+export default function NewCallScreen({ navigation }: any) {
+  // Estados
   const [description, setDescription] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
+  const [address, setAddress] = useState<string | null>(null);
+  const [loadingLocation, setLoadingLocation] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // Função para tirar foto com a câmera
   async function handleTakePhoto() {
-    // 1. Pede permissão para usar a câmera
     const permission = await ImagePicker.requestCameraPermissionsAsync();
 
     if (!permission.granted) {
@@ -26,14 +31,12 @@ export default function NewCallScreen() {
       return;
     }
 
-    // 2. Abre a câmera
     const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true, // Permite cortar a foto
-      aspect: [4, 3],      // Proporção da imagem
-      quality: 0.7,        // Qualidade (70% para não pesar o app)
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.7,
     });
 
-    // 3. Se o usuário não cancelou, salva o endereço (URI) da foto
     if (!result.canceled) {
       setPhotoUri(result.assets[0].uri);
     }
@@ -44,7 +47,8 @@ export default function NewCallScreen() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
-      Alert.alert('Permissão negada', 'Precisamos acessar suas fotos.');      return;
+      Alert.alert('Permissão negada', 'Precisamos acessar suas fotos.');
+      return;
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -58,9 +62,82 @@ export default function NewCallScreen() {
     }
   }
 
+  // Obter localização
+  async function handleGetLocation() {
+    const permission = await Location.requestForegroundPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permissão negada', 'Precisamos da localização para o check-in');
+      return;
+    }
+    setLoadingLocation(true);
+    try {
+      const gpsAtivo = await Location.hasServicesEnabledAsync();
+      if (!gpsAtivo) {
+        Alert.alert('GPS desligado', 'Ative a localização do aparelho e tente novamente');
+        return;
+      }
+      const position = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      const [local] = await Location.reverseGeocodeAsync({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      });
+      if (local) {
+        const enderecoFormatado = `${local.street ?? 'Endereço não identificado'}, ${local.city ?? ''} - ${local.region ?? ''}`;
+        setAddress(enderecoFormatado);
+      } else {
+        setAddress('Endereço não encontrado para esta coordenada.');
+      }
+    } catch (error) {
+      Alert.alert('Erro', 'Não foi possível obter a localização. Tente novamente');
+    } finally {
+      setLoadingLocation(false);
+    }
+  }
+
+  // Criar chamado
+  async function handleCreateCall() {
+    if (!description.trim()) {
+      Alert.alert('Aviso', 'Preencha a descrição do chamado.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await addDoc(collection(db, 'alunos', ALUNO_ID, 'chamados'), {
+        description: description.trim(),
+        photoUri,
+        address,
+        status: 'aberto',
+        criadoEm: serverTimestamp(),
+      });
+
+      Alert.alert('Sucesso', 'Chamado registrado com sucesso!', [
+        {
+          text: 'OK',
+          onPress: () => {
+            setDescription('');
+            setPhotoUri(null);
+            setAddress(null);
+            if (navigation) {
+              navigation.navigate('CallList');
+            }
+          },
+        },
+      ]);
+    } catch (error) {
+      console.log('Erro ao criar chamado:', error);
+      Alert.alert('Erro', 'Não foi possível salvar o chamado. Tente novamente.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Novo Chamado</Text>
+      
       <Text style={styles.label}>Descrição do problema</Text>
       <TextInput
         style={styles.input}
@@ -69,14 +146,12 @@ export default function NewCallScreen() {
         onChangeText={setDescription}
         multiline
       />
+
       <Text style={styles.label}>Foto do equipamento</Text>
-      {/*Renderização Condicional: Se tem foto, mostra a imagem. Se não, mostra o aviso.*/}
       {photoUri ? (
         <View>
           <Image source={{ uri: photoUri }} style={styles.photo} />
-          <TouchableOpacity
-            onPress={() => setPhotoUri(null)}
-            style={styles.removeButton}>
+          <TouchableOpacity onPress={() => setPhotoUri(null)} style={styles.removeButton}>
             <Text style={styles.removeButtonText}>Remover foto</Text>
           </TouchableOpacity>
         </View>
@@ -94,12 +169,37 @@ export default function NewCallScreen() {
           <Text style={styles.buttonText}>Galeria</Text>
         </TouchableOpacity>
       </View>
+
+      <Text style={styles.label}>Localização do chamado</Text>
+      {loadingLocation ? (
+        <Text style={styles.placeholderText}>Buscando localização...</Text>
+      ) : address ? (
+        <Text style={styles.addressText}>{address}</Text>
+      ) : (
+        <Text style={styles.placeholderText}>Nenhuma localização registrada</Text>
+      )}
       <TouchableOpacity
-        style={[styles.button, styles.confirmButton, !description && styles.disabledButton]}
-        disabled={!description}
-        onPress={() => Alert.alert('Sucesso', 'Chamado registrado localmente!')}
+        style={[styles.button, styles.locationButton]}
+        onPress={handleGetLocation}
+        disabled={loadingLocation}
       >
-        <Text style={styles.buttonText}>Criar Chamado</Text>
+        <Text style={styles.buttonText}>
+          {loadingLocation ? 'Buscando...' : 'Registrar localização'}
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[
+          styles.button,
+          styles.confirmButton,
+          (!description || saving) && styles.disabledButton,
+        ]}
+        disabled={!description || saving}
+        onPress={handleCreateCall}
+      >
+        <Text style={styles.buttonText}>
+          {saving ? 'Salvando...' : 'Criar Chamado'}
+        </Text>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -123,4 +223,6 @@ const styles = StyleSheet.create({
   confirmButton: { backgroundColor: '#2e7d32', marginTop: 20 },
   disabledButton: { backgroundColor: '#a5d6a7' },
   buttonText: { color: '#fff', fontWeight: 'bold' },
+  addressText: { fontSize: 14, color: '#333', marginBottom: 8 },
+  locationButton: { backgroundColor: '#00695c', marginTop: 8 },
 });

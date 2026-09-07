@@ -3,6 +3,15 @@
     "name": "techcall",
     "slug": "techcall",
     "version": "1.0.0",
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Permita o acesso à localização para registrar o local do chamado."
+        }
+      ],
+      "expo-status-bar"
+    ],
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
