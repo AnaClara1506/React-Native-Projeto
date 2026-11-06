@@ -1,14 +1,70 @@
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer } from '@react-navigation/native';
+import { useEffect } from 'react';
+import { Platform } from 'react-native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import * as Notifications from 'expo-notifications';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import NewCallScreen from './src/screens/NewCallScreen';
 import CallListScreen from './src/screens/CallListScreen';
 import CallDetailScreen from './src/screens/CallDetailScreen';
+
 const Stack = createNativeStackNavigator();
 
+export const navigationRef = createNavigationContainerRef<any>();
+ 
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldPlaySound: true,
+    shouldSetBadge: false,
+    shouldShowBanner: true,
+    shouldShowList: true,
+  }),
+});
+
 export default function App() {
+  useEffect(() => {
+    // Cria o canal de notificações do Android (obrigatório a partir do Android 8)
+    if (Platform.OS === 'android') {
+      try {
+        Notifications.setNotificationChannelAsync('chamados', {
+          name: 'Atualizações de chamados',
+          importance: Notifications.AndroidImportance.HIGH,
+        }).catch((err) => console.log('Canal já existe ou falhou ao registrar:', err));
+      } catch (error) {
+        console.error('Erro ao criar canal de notificações:', error);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    // Reage ao toque na notificação com o app aberto ou em background
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = response.notification.request.content.data as { chamadoId?: string };
+      const chamadoId = data?.chamadoId;
+
+      if (chamadoId && navigationRef.isReady()) {
+        navigationRef.navigate('CallDetail', { chamadoId });
+      }
+    });
+
+    // Reage ao toque com o app totalmente fechado
+    async function checkInitialNotification() {
+      const response = await Notifications.getLastNotificationResponseAsync();
+      const data = response?.notification.request.content.data as { chamadoId?: string } | undefined;
+      const chamadoId = data?.chamadoId;
+
+      if (chamadoId && navigationRef.isReady()) {
+        navigationRef.navigate('CallDetail', { chamadoId });
+      }
+    }
+
+    checkInitialNotification();
+
+    return () => subscription.remove();
+  }, []);
+
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <StatusBar style="auto" />
       <Stack.Navigator initialRouteName="CallList">
         <Stack.Screen name="CallList" component={CallListScreen} options={{ title: 'Chamados' }} />

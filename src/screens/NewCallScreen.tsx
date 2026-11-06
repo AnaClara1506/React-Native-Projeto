@@ -11,8 +11,11 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { db, ALUNO_ID } from '../firebase/config';
+import * as Notifications from 'expo-notifications';
+
+const SLA_SECONDS = 10;
 
 export default function NewCallScreen({ navigation }: any) {
   // Estados
@@ -98,41 +101,54 @@ export default function NewCallScreen({ navigation }: any) {
 
   // Criar chamado
   async function handleCreateCall() {
-    if (!description.trim()) {
-      Alert.alert('Aviso', 'Preencha a descrição do chamado.');
-      return;
-    }
+  setSaving(true);
 
-    setSaving(true);
-    try {
-      await addDoc(collection(db, 'alunos', ALUNO_ID, 'chamados'), {
-        description: description.trim(),
-        photoUri,
-        address,
-        status: 'aberto',
-        criadoEm: serverTimestamp(),
+  try {
+    // 1. Cria o documento no Firestore
+    const docRef = await addDoc(collection(db, 'alunos', ALUNO_ID, 'chamados'), {
+      description,
+      photoUri,
+      address,
+      status: 'aberto',
+      criadoEm: serverTimestamp(),
+    });
+
+    // 2. Pede permissão e agenda a notificação de SLA
+    const permission = await Notifications.requestPermissionsAsync();
+
+    if (permission.granted) {
+      const notificationId = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'TechCall - Alerta de SLA',
+          body: 'O prazo de atendimento de um chamado expirou!',
+          data: { chamadoId: docRef.id },
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+          seconds: SLA_SECONDS,
+        },
       });
 
-      Alert.alert('Sucesso', 'Chamado registrado com sucesso!', [
-        {
-          text: 'OK',
-          onPress: () => {
-            setDescription('');
-            setPhotoUri(null);
-            setAddress(null);
-            if (navigation) {
-              navigation.navigate('CallList');
-            }
-          },
-        },
-      ]);
-    } catch (error) {
-      console.log('Erro ao criar chamado:', error);
-      Alert.alert('Erro', 'Não foi possível salvar o chamado. Tente novamente.');
-    } finally {
-      setSaving(false);
+      // 3. Salva o id da notificação agendada no próprio chamado recém-criado
+      await updateDoc(docRef, { 
+        slaNotificationId: notificationId 
+      });
     }
+
+    // 4. Limpa o formulário e navega de volta
+    Alert.alert('Sucesso', 'Chamado registrado!');
+    setDescription('');
+    setPhotoUri(null);
+    setAddress(null);
+    navigation.navigate('CallList');
+
+  } catch (error) {
+    console.error('Erro ao criar chamado:', error);
+    Alert.alert('Erro', 'Não foi possível salvar o chamado. Tente novamente.');
+  } finally {
+    setSaving(false);
   }
+}
 
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
