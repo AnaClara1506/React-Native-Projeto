@@ -126,6 +126,7 @@ export default function NewCallScreen({ navigation }: any) {
         trigger: {
           type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
           seconds: SLA_SECONDS,
+          channelId: 'chamados',
         },
       });
 

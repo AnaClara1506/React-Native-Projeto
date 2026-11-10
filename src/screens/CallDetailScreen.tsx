@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import * as Notifications from 'expo-notifications'; // 1. Importação necessária
 import { db, ALUNO_ID } from '../firebase/config';
 
 type Chamado = {
@@ -8,6 +9,7 @@ type Chamado = {
   photoUri?: string | null;
   address?: string | null;
   status: string;
+  slaNotificationId?: string | null; // 2. Incluído o ID da notificação na tipagem
 };
 
 export default function CallDetailScreen({ route }: any) {
@@ -43,10 +45,24 @@ export default function CallDetailScreen({ route }: any) {
       setLoading(true);
       const docRef = doc(db, 'alunos', ALUNO_ID, 'chamados', chamadoId);
 
-      await updateDoc(docRef, { status: novoStatus });
+      // 3. Cancela a notificação agendada se existir um ID salvo
+      if (chamado?.slaNotificationId) {
+        try {
+          await Notifications.cancelScheduledNotificationAsync(chamado.slaNotificationId);
+          console.log('Notificação de SLA cancelada com sucesso:', chamado.slaNotificationId);
+        } catch (notifError) {
+          console.log('Erro ao cancelar notificação:', notifError);
+        }
+      }
+
+      // 4. Atualiza o status e remove/limpa o ID da notificação no banco
+      await updateDoc(docRef, { 
+        status: novoStatus,
+        slaNotificationId: null // Remove o ID para não tentar cancelar duas vezes
+      });
 
       // Atualiza o estado local para a tela refletir a mudança na hora
-      setChamado((prev) => (prev ? { ...prev, status: novoStatus } : null));
+      setChamado((prev) => (prev ? { ...prev, status: novoStatus, slaNotificationId: null } : null));
     } catch (error) {
       console.log('Erro ao atualizar status:', error);
       Alert.alert('Erro', 'Não foi possível alterar o status.');
